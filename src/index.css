@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 20% 8%;
+    --foreground: 210 20% 96%;
+    --card: 222 20% 10%;
+    --card-foreground: 210 20% 96%;
+    --popover: 222 20% 10%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 199 89% 48%;
+    --primary-foreground: 222 20% 8%;
+    --secondary: 222 20% 14%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 222 20% 14%;
+    --muted-foreground: 215 16% 55%;
+    --accent: 199 89% 48%;
+    --accent-foreground: 222 20% 8%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 222 20% 18%;
+    --input: 222 20% 14%;
+    --ring: 199 89% 48%;
+    --radius: 0.75rem;
+    --chart-1: 199 89% 48%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+
+    /* Custom tokens */
+    --sidebar-bg: 222 25% 7%;
+    --chat-user-bg: 199 89% 20%;
+    --chat-ai-bg: 222 20% 13%;
+    --avatar-bg: 222 25% 6%;
+    --glow-primary: 199 89% 48%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    overflow: hidden;
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(222 20% 22%);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(222 20% 30%);
+}
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 0 20px hsl(199 89% 48% / 0.3);
+}
+
+.glow-primary-sm {
+  box-shadow: 0 0 10px hsl(199 89% 48% / 0.2);
+}
+
+/* Typing cursor animation */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.typing-cursor::after {
+  content: '|';
+  animation: blink 0.8s ease-in-out infinite;
+  color: hsl(var(--primary));
+  margin-left: 1px;
+}
+
+/* Avatar pulse animation */
+@keyframes avatar-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(199 89% 48% / 0.4); }
+  50% { box-shadow: 0 0 0 8px hsl(199 89% 48% / 0); }
+}
+
+.avatar-speaking {
+  animation: avatar-pulse 1.5s ease-in-out infinite;
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, hsl(199 89% 58%), hsl(220 70% 65%));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Wave animation for avatar bars */
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
+
+.wave-bar {
+  display: inline-block;
+  width: 3px;
+  height: 16px;
+  background: hsl(var(--primary));
+  border-radius: 2px;
+  animation: wave 0.8s ease-in-out infinite;
+}
+
+.wave-bar:nth-child(1) { animation-delay: 0s; }
+.wave-bar:nth-child(2) { animation-delay: 0.1s; }
+.wave-bar:nth-child(3) { animation-delay: 0.2s; }
+.wave-bar:nth-child(4) { animation-delay: 0.3s; }
+.wave-bar:nth-child(5) { animation-delay: 0.4s; }
+
+/* Message fade-in */
+@keyframes messageIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-enter {
+  animation: messageIn 0.25s ease-out forwards;
+}
+
+/* Sidebar transition */
+.sidebar-transition {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
