@@ -13,6 +13,9 @@ dist-ssr
 *.local
 .env
 
+# ローカルSQLite（RAGの知識・会話データ）
+server/data
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Paperclip, Mic } from 'lucide-react';
+import { Send, Paperclip, Mic, BookOpen } from 'lucide-react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { cn } from '../lib/utils';
+import { streamChat, type ChatWireMessage } from '../lib/api';
+import { useSettings } from '../context/SettingsContext';
+import type { RagSource, QuoteDraft } from '../types';
 
 export interface Message {
   id: string;
@@ -10,75 +13,37 @@ export interface Message {
   content: string;
   timestamp: Date;
   streaming?: boolean;
+  sources?: RagSource[];
 }
 
 interface ChatInterfaceProps {
   onNewMessage?: (message: Message) => void;
+  /** アシスタント応答が確定したときに全文を通知（アバター読み上げ等に使用） */
+  onAssistantComplete?: (text: string) => void;
+  /** サーバーが会話から自動生成した見積ドラフトを通知（PDFを自動表示） */
+  onQuoteDraft?: (draft: QuoteDraft) => void;
 }
 
-const DEMO_RESPONSES = [
-  `承知いたしました。ご要件を整理いたします。
+const GREETING: Message = {
+  id: '0',
+  role: 'assistant',
+  content:
+    'こんにちは！AIアシスタントです。ご質問やご要件をお気軽にお聞かせください。見積書・提案書の作成もサポートいたします。',
+  timestamp: new Date(),
+};
 
-お客様のニーズを踏まえ、以下のようなソリューションをご提案できます。
-
-**提案内容**
-1. AIエージェント基盤の構築
-2. 既存システムとのAPI連携
-3. 運用保守サポート
-
-詳細なお見積もりを作成いたします。画面右下の「PDF生成」ボタンから見積書をダウンロードいただけます。`,
-  `ご質問ありがとうございます。具体的なご要件をお聞かせいただけますか？
-
-- 対象ユーザー数
-- 必要な機能一覧
-- 希望納期
-- 予算感
-
-これらの情報をもとに、最適なプランをご提案いたします。`,
-  `はい、その点については十分に対応可能です。
-
-弊社では以下の技術スタックで対応しております：
-- **フロントエンド**: React / TypeScript
-- **バックエンド**: Node.js / Python
-- **AI基盤**: Claude API / GPT-4
-- **インフラ**: AWS / GCP
-
-ご希望の要件に合わせてカスタマイズいたします。`,
-];
-
-function simulateStream(
-  text: string,
-  onChunk: (chunk: string) => void,
-  onDone: () => void
-) {
-  let i = 0;
-  const interval = setInterval(() => {
-    if (i < text.length) {
-      const chunkSize = Math.floor(Math.random() * 4) + 1;
-      onChunk(text.slice(i, i + chunkSize));
-      i += chunkSize;
-    } else {
-      clearInterval(interval);
-      onDone();
-    }
-  }, 18);
-  return () => clearInterval(interval);
-}
-
-export default function ChatInterface({ onNewMessage }: ChatInterfaceProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '0',
-      role: 'assistant',
-      content: 'こんにちは！AIアシスタントです。ご質問やご要件をお気軽にお聞かせください。見積書・提案書の作成もサポートいたします。',
-      timestamp: new Date(),
-    },
-  ]);
+export default function ChatInterface({
+  onNewMessage,
+  onAssistantComplete,
+  onQuoteDraft,
+}: ChatInterfaceProps) {
+  const { model, ragEnabled } = useSettings();
+  const [messages, setMessages] = useState<Message[]>([GREETING]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const stopStreamRef = useRef<(() => void) | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -95,46 +60,59 @@ export default function ChatInterface({ onNewMessage }: ChatInterfaceProps) {
       timestamp: new Date(),
     };
 
+    // 送信するのは「今表示している履歴＋今回のユーザー発言」（空メッセージは除く）
+    const history: ChatWireMessage[] = [...messages, userMsg]
+      .filter((m) => m.content.trim())
+      .map((m) => ({ role: m.role, content: m.content }));
+
     setMessages((prev) => [...prev, userMsg]);
     onNewMessage?.(userMsg);
     setInput('');
     setIsStreaming(true);
 
-    const responseText = DEMO_RESPONSES[Math.floor(Math.random() * DEMO_RESPONSES.length)];
     const assistantId = (Date.now() + 1).toString();
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: 'assistant', content: '', timestamp: new Date(), streaming: true },
+    ]);
 
-    const assistantMsg: Message = {
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      timestamp: new Date(),
-      streaming: true,
+    const ac = new AbortController();
+    abortRef.current = ac;
+    let acc = '';
+
+    const finalize = () => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === assistantId ? { ...m, content: acc, streaming: false } : m)),
+      );
+      onNewMessage?.({ id: assistantId, role: 'assistant', content: acc, timestamp: new Date() });
+      onAssistantComplete?.(acc);
+      setIsStreaming(false);
     };
 
-    setMessages((prev) => [...prev, assistantMsg]);
-
-    stopStreamRef.current = simulateStream(
-      responseText,
-      (chunk) => {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + chunk } : m))
-        );
+    streamChat(
+      { messages: history, model, ragEnabled },
+      {
+        onSources: (sources) =>
+          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, sources } : m))),
+        onQuote: (draft) => onQuoteDraft?.(draft),
+        onDelta: (delta) => {
+          acc += delta;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: acc } : m)),
+          );
+        },
+        onDone: finalize,
+        onError: (msg) => {
+          acc = acc || `⚠️ エラー: ${msg}`;
+          finalize();
+        },
+        signal: ac.signal,
       },
-      () => {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m))
-        );
-        const finalMsg: Message = {
-          id: assistantId,
-          role: 'assistant',
-          content: responseText,
-          timestamp: new Date(),
-        };
-        onNewMessage?.(finalMsg);
-        setIsStreaming(false);
-      }
-    );
-  }, [input, isStreaming, onNewMessage]);
+    ).catch((e) => {
+      acc = acc || `⚠️ 通信エラー: ${e instanceof Error ? e.message : String(e)}`;
+      finalize();
+    });
+  }, [input, isStreaming, messages, model, ragEnabled, onNewMessage, onAssistantComplete, onQuoteDraft]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -185,14 +163,14 @@ export default function ChatInterface({ onNewMessage }: ChatInterfaceProps) {
               'rounded-lg px-3 h-8 transition-all',
               input.trim() && !isStreaming
                 ? 'bg-primary text-primary-foreground glow-primary-sm hover:opacity-90'
-                : 'opacity-40'
+                : 'opacity-40',
             )}
           >
             <Send size={14} />
           </Button>
         </div>
         <p className="text-xs text-muted-foreground/50 text-center mt-2">
-          Enter で送信 · Shift+Enter で改行
+          Enter で送信 · Shift+Enter で改行 {ragEnabled && '· RAG有効'}
         </p>
       </div>
     </div>
@@ -210,7 +188,7 @@ function MessageBubble({ message }: { message: Message }) {
           'w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-0.5',
           isUser
             ? 'bg-primary/20 text-primary border border-primary/30'
-            : 'bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 text-cyan-400'
+            : 'bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 text-cyan-400',
         )}
       >
         {isUser ? 'U' : 'AI'}
@@ -223,11 +201,25 @@ function MessageBubble({ message }: { message: Message }) {
             'rounded-2xl px-4 py-2.5 text-sm leading-relaxed',
             isUser
               ? 'bg-primary/20 border border-primary/25 text-foreground rounded-tr-sm'
-              : 'bg-[hsl(222_20%_13%)] border border-border/50 text-foreground/90 rounded-tl-sm'
+              : 'bg-[hsl(222_20%_13%)] border border-border/50 text-foreground/90 rounded-tl-sm',
           )}
         >
           <MessageContent content={message.content} streaming={message.streaming} />
         </div>
+
+        {message.sources && message.sources.length > 0 && (
+          <div className="flex flex-col gap-0.5 px-1">
+            <span className="text-[10px] text-muted-foreground/60 flex items-center gap-1">
+              <BookOpen size={10} /> 参考にした社内ナレッジ
+            </span>
+            {message.sources.map((s, i) => (
+              <span key={i} className="text-[10px] text-muted-foreground/50 truncate max-w-[300px]">
+                • {s.title}（類似度 {s.score}）
+              </span>
+            ))}
+          </div>
+        )}
+
         <span className="text-xs text-muted-foreground/50 px-1">
           {message.timestamp.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
         </span>
@@ -250,16 +242,17 @@ function MessageContent({ content, streaming }: { content: string; streaming?: b
             </span>
           );
         }
-        // Bold inline
         const parts = line.split(/(\*\*[^*]+\*\*)/g);
         return (
           <span key={i}>
             {parts.map((part, j) =>
               part.startsWith('**') && part.endsWith('**') ? (
-                <strong key={j} className="text-foreground font-semibold">{part.slice(2, -2)}</strong>
+                <strong key={j} className="text-foreground font-semibold">
+                  {part.slice(2, -2)}
+                </strong>
               ) : (
                 <span key={j}>{part}</span>
-              )
+              ),
             )}
             {i < lines.length - 1 && <br />}
           </span>

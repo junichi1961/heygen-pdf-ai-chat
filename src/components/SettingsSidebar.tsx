@@ -7,40 +7,33 @@ import {
   Cpu,
   ChevronDown,
   ChevronRight,
-  AlertCircle,
-  ExternalLink,
   RefreshCw,
+  Loader2,
+  CheckCircle,
 } from 'lucide-react';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Switch } from './ui/switch';
 import { cn } from '../lib/utils';
+import { useSettings } from '../context/SettingsContext';
+import { CLAUDE_MODELS } from '../types';
+import { ragIngest } from '../lib/api';
 
 interface SettingsSidebarProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-interface ServiceStatus {
-  name: string;
-  status: 'connected' | 'disconnected' | 'error';
-}
+type Status = 'connected' | 'disconnected' | 'error';
 
-const SERVICES: ServiceStatus[] = [
-  { name: 'Claude API', status: 'disconnected' },
-  { name: 'HeyGen API', status: 'disconnected' },
-  { name: 'Vector DB', status: 'disconnected' },
-  { name: 'NotebookLM', status: 'disconnected' },
-];
-
-function StatusBadge({ status }: { status: ServiceStatus['status'] }) {
+function StatusBadge({ status }: { status: Status }) {
   return (
     <span
       className={cn(
         'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
         status === 'connected' && 'bg-emerald-500/15 text-emerald-400',
         status === 'disconnected' && 'bg-muted/80 text-muted-foreground',
-        status === 'error' && 'bg-red-500/15 text-red-400'
+        status === 'error' && 'bg-red-500/15 text-red-400',
       )}
     >
       {status === 'connected' ? '接続済み' : status === 'error' ? 'エラー' : '未設定'}
@@ -76,70 +69,63 @@ function Section({
           <ChevronRight size={14} className="text-muted-foreground" />
         )}
       </button>
-      {open && (
-        <div className="px-4 py-4 space-y-3 bg-[hsl(222_20%_8.5%)]">{children}</div>
-      )}
-    </div>
-  );
-}
-
-function ApiKeyField({ label, placeholder }: { label: string; placeholder: string }) {
-  const [value, setValue] = useState('');
-  const [saved, setSaved] = useState(false);
-
-  const handleSave = () => {
-    if (!value) return;
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      <div className="flex gap-2">
-        <Input
-          type="password"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={placeholder}
-          className="h-8 text-xs bg-secondary/50 border-border/60 font-mono"
-        />
-        <button
-          onClick={handleSave}
-          className={cn(
-            'px-3 h-8 text-xs rounded-lg border transition-all whitespace-nowrap',
-            saved
-              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-              : 'border-border/60 bg-secondary/50 text-muted-foreground hover:text-foreground hover:border-border'
-          )}
-        >
-          {saved ? '保存済み' : '保存'}
-        </button>
-      </div>
+      {open && <div className="px-4 py-4 space-y-3 bg-[hsl(222_20%_8.5%)]">{children}</div>}
     </div>
   );
 }
 
 export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProps) {
-  const [ragEnabled, setRagEnabled] = useState(false);
-  const [streamingEnabled, setStreamingEnabled] = useState(true);
-  const [autoAvatar, setAutoAvatar] = useState(false);
+  const { model, setModel, ragEnabled, setRagEnabled, autoAvatar, setAutoAvatar, status, refreshStatus } =
+    useSettings();
+
+  // RAG 取り込みフォーム
+  const [ingestTitle, setIngestTitle] = useState('');
+  const [ingestText, setIngestText] = useState('');
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestMsg, setIngestMsg] = useState<string | null>(null);
+
+  const handleIngest = async () => {
+    if (!ingestText.trim()) return;
+    setIngesting(true);
+    setIngestMsg(null);
+    try {
+      const res = await ragIngest({
+        title: ingestTitle.trim() || '無題ドキュメント',
+        text: ingestText,
+      });
+      setIngestMsg(`取り込み完了: ${res.chunks} チャンク`);
+      setIngestText('');
+      setIngestTitle('');
+      refreshStatus();
+    } catch (e) {
+      setIngestMsg(`エラー: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setIngesting(false);
+    }
+  };
+
+  const services: { name: string; status: Status }[] = [
+    {
+      name: status?.mock ? 'Claude（ローカルモック）' : 'Claude API',
+      status: status?.mock || status?.anthropic ? 'connected' : 'disconnected',
+    },
+    { name: 'HeyGen API', status: status?.heygen ? 'connected' : 'disconnected' },
+    {
+      name: `RAG (${status?.embeddingProvider ?? '—'})`,
+      status: (status?.rag.chunks ?? 0) > 0 ? 'connected' : 'disconnected',
+    },
+  ];
 
   return (
     <>
-      {/* Backdrop */}
       {isOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]"
-          onClick={onClose}
-        />
+        <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
       )}
 
-      {/* Drawer */}
       <div
         className={cn(
           'fixed right-0 top-0 bottom-0 z-50 w-80 flex flex-col bg-[hsl(222_20%_9%)] border-l border-border/50 shadow-2xl sidebar-transition',
-          isOpen ? 'translate-x-0' : 'translate-x-full'
+          isOpen ? 'translate-x-0' : 'translate-x-full',
         )}
       >
         {/* Header */}
@@ -148,12 +134,21 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
             <h2 className="text-sm font-semibold text-foreground">設定</h2>
             <p className="text-xs text-muted-foreground mt-0.5">API・データソース管理</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={refreshStatus}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
+              title="状況を更新"
+            >
+              <RefreshCw size={14} />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -161,13 +156,20 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
           {/* Status overview */}
           <div className="rounded-xl border border-border/40 overflow-hidden">
             <div className="px-4 py-2.5 bg-secondary/30 border-b border-border/30">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">接続状況</span>
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                接続状況（ローカルサーバー）
+              </span>
             </div>
             <div className="p-3 space-y-1.5">
-              {SERVICES.map((svc) => (
+              {services.map((svc) => (
                 <div key={svc.name} className="flex items-center justify-between py-1">
                   <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40" />
+                    <div
+                      className={cn(
+                        'w-1.5 h-1.5 rounded-full',
+                        svc.status === 'connected' ? 'bg-emerald-500' : 'bg-muted-foreground/40',
+                      )}
+                    />
                     <span className="text-xs text-foreground/70">{svc.name}</span>
                   </div>
                   <StatusBadge status={svc.status} />
@@ -176,65 +178,84 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
             </div>
           </div>
 
-          {/* API Keys */}
-          <Section icon={<Key size={14} />} title="APIキー設定" defaultOpen>
-            <ApiKeyField label="Claude API Key" placeholder="sk-ant-..." />
-            <ApiKeyField label="HeyGen API Key" placeholder="heygen_..." />
-            <ApiKeyField label="OpenAI API Key (補助)" placeholder="sk-..." />
-            <div className="pt-1 flex items-center gap-2 text-xs text-muted-foreground/60">
-              <AlertCircle size={11} />
-              <span>キーはローカルにのみ保存されます</span>
+          {/* API Keys (server-managed) */}
+          <Section icon={<Key size={14} />} title="APIキー（サーバー管理）" defaultOpen>
+            <div className="rounded-lg bg-secondary/30 border border-border/40 p-3 text-xs text-muted-foreground/80 leading-relaxed space-y-2">
+              <p>
+                APIキーは漏洩防止のため<strong className="text-foreground/80">ブラウザには保存せず</strong>、
+                ローカルの <code className="text-cyan-400">server/.env</code> に設定します。
+              </p>
+              <pre className="bg-[hsl(222_25%_6%)] rounded p-2 text-[10px] text-foreground/70 overflow-x-auto">
+{`ANTHROPIC_API_KEY=sk-ant-...
+HEYGEN_API_KEY=...
+HEYGEN_AVATAR_ID=...`}
+              </pre>
+              <p>編集後、<code className="text-cyan-400">npm run server</code> を再起動してください。</p>
             </div>
           </Section>
 
-          {/* RAG / Vector DB */}
-          <Section icon={<Database size={14} />} title="ベクターDB / RAG">
+          {/* RAG / Knowledge ingest */}
+          <Section icon={<Database size={14} />} title="ナレッジ取り込み / RAG" defaultOpen>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-medium text-foreground/80">RAG機能</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">ドキュメント検索を有効化</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  回答時に社内ナレッジを検索・参照
+                </p>
               </div>
-              <Switch
-                checked={ragEnabled}
-                onCheckedChange={setRagEnabled}
-                className="scale-90"
-              />
+              <Switch checked={ragEnabled} onCheckedChange={setRagEnabled} className="scale-90" />
             </div>
 
-            <ApiKeyField label="Supabase Vector URL" placeholder="https://..." />
-
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">ベクターDB種別</Label>
-              <select className="w-full h-8 text-xs bg-secondary/50 border border-border/60 rounded-lg px-2 text-foreground focus:outline-none focus:border-primary/50">
-                <option>Supabase pgvector</option>
-                <option>Pinecone</option>
-                <option>Weaviate</option>
-                <option>Chroma</option>
-              </select>
+            <div className="text-[10px] text-muted-foreground/60">
+              保存済み: {status?.rag.documents ?? 0} 文書 / {status?.rag.chunks ?? 0} チャンク
             </div>
 
-            {ragEnabled && (
-              <button className="w-full h-8 text-xs border border-primary/30 rounded-lg text-primary hover:bg-primary/10 transition-colors flex items-center justify-center gap-2">
-                <RefreshCw size={11} />
-                インデックスを再構築
-              </button>
-            )}
-          </Section>
-
-          {/* NotebookLM */}
-          <Section icon={<BookOpen size={14} />} title="NotebookLM連携">
-            <div className="rounded-lg bg-amber-500/8 border border-amber-500/20 p-3 text-xs text-amber-400/80 flex gap-2">
-              <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
-              <span>NotebookLMのAPI公開は準備中です。現在はダミーUIとして表示しています。</span>
-            </div>
-            <ApiKeyField label="NotebookLM API Key (準備中)" placeholder="coming soon..." />
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">ノートブックID</Label>
+            <div className="space-y-1.5 pt-1">
+              <Label className="text-xs text-muted-foreground">ドキュメント名</Label>
               <Input
-                placeholder="notebook-XXXX"
-                disabled
-                className="h-8 text-xs bg-secondary/30 border-border/40 opacity-50"
+                value={ingestTitle}
+                onChange={(e) => setIngestTitle(e.target.value)}
+                placeholder="例: 製品カタログ / 提案テンプレート"
+                className="h-8 text-xs bg-secondary/50 border-border/60"
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">本文テキスト</Label>
+              <textarea
+                value={ingestText}
+                onChange={(e) => setIngestText(e.target.value)}
+                placeholder="NotebookLM等から取り出した知識テキストを貼り付け..."
+                rows={4}
+                className="w-full text-xs bg-secondary/50 border border-border/60 rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-primary/50 resize-none"
+              />
+            </div>
+            <button
+              onClick={handleIngest}
+              disabled={ingesting || !ingestText.trim()}
+              className="w-full h-8 text-xs border border-primary/30 rounded-lg text-primary hover:bg-primary/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-40"
+            >
+              {ingesting ? (
+                <>
+                  <Loader2 size={11} className="animate-spin" /> 取り込み中...
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={11} /> インデックスに取り込む
+                </>
+              )}
+            </button>
+            {ingestMsg && (
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
+                <CheckCircle size={11} className="text-emerald-400" />
+                {ingestMsg}
+              </div>
+            )}
+
+            <div className="rounded-lg bg-amber-500/8 border border-amber-500/20 p-2.5 text-[10px] text-amber-400/80 flex gap-2">
+              <BookOpen size={12} className="flex-shrink-0 mt-0.5" />
+              <span>
+                NotebookLM は公式APIが未公開のため、共有ソースの本文をここに貼り付けて自前RAG化します。
+              </span>
             </div>
           </Section>
 
@@ -242,40 +263,17 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
           <Section icon={<Cpu size={14} />} title="AIモデル設定">
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">使用モデル</Label>
-              <select className="w-full h-8 text-xs bg-secondary/50 border border-border/60 rounded-lg px-2 text-foreground focus:outline-none focus:border-primary/50">
-                <option>claude-3-5-sonnet-20241022</option>
-                <option>claude-3-opus-20240229</option>
-                <option>claude-3-haiku-20240307</option>
-                <option>gpt-4o</option>
-                <option>gpt-4o-mini</option>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="w-full h-8 text-xs bg-secondary/50 border border-border/60 rounded-lg px-2 text-foreground focus:outline-none focus:border-primary/50"
+              >
+                {CLAUDE_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
               </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Temperature</Label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  defaultValue="0.7"
-                  className="flex-1 accent-cyan-500"
-                />
-                <span className="text-xs text-muted-foreground w-8 text-right">0.7</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-foreground/80">ストリーミング</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">リアルタイム返信</p>
-              </div>
-              <Switch
-                checked={streamingEnabled}
-                onCheckedChange={setStreamingEnabled}
-                className="scale-90"
-              />
             </div>
 
             <div className="flex items-center justify-between">
@@ -283,11 +281,7 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
                 <p className="text-xs font-medium text-foreground/80">自動アバター応答</p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">AI返信をアバターが読み上げ</p>
               </div>
-              <Switch
-                checked={autoAvatar}
-                onCheckedChange={setAutoAvatar}
-                className="scale-90"
-              />
+              <Switch checked={autoAvatar} onCheckedChange={setAutoAvatar} className="scale-90" />
             </div>
           </Section>
         </div>
@@ -295,11 +289,10 @@ export default function SettingsSidebar({ isOpen, onClose }: SettingsSidebarProp
         {/* Footer */}
         <div className="px-5 py-3 border-t border-border/50">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-muted-foreground/50">v1.0.0-beta</span>
-            <button className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors flex items-center gap-1">
-              <ExternalLink size={10} />
-              ドキュメント
-            </button>
+            <span className="text-[10px] text-muted-foreground/50">v1.0.0-local</span>
+            <span className="text-[10px] text-muted-foreground/50">
+              {status ? 'サーバー接続 OK' : 'サーバー未接続'}
+            </span>
           </div>
         </div>
       </div>

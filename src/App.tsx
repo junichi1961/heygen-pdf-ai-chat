@@ -15,6 +15,9 @@ import ChatInterface, { Message } from './components/ChatInterface';
 import AvatarPanel from './components/AvatarPanel';
 import PdfGenerator from './components/PdfGenerator';
 import SettingsSidebar from './components/SettingsSidebar';
+import { SettingsProvider, useSettings } from './context/SettingsContext';
+import { useHeyGenAvatar } from './hooks/useHeyGenAvatar';
+import type { QuoteDraft } from './types';
 import { cn } from './lib/utils';
 import './App.css';
 
@@ -32,12 +35,24 @@ const INITIAL_CONVERSATIONS: Conversation[] = [
 ];
 
 export default function App() {
+  return (
+    <SettingsProvider>
+      <AppInner />
+    </SettingsProvider>
+  );
+}
+
+function AppInner() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pdfOpen, setPdfOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [activeConv, setActiveConv] = useState('1');
   const [conversations] = useState(INITIAL_CONVERSATIONS);
+  const [quoteDraft, setQuoteDraft] = useState<QuoteDraft | null>(null);
+
+  const { autoAvatar } = useSettings();
+  const avatar = useHeyGenAvatar();
 
   return (
     <div className="flex h-screen w-screen bg-[hsl(222_25%_6%)] overflow-hidden">
@@ -174,19 +189,41 @@ export default function App() {
         <div className="flex-1 flex min-h-0 overflow-hidden">
           {/* Chat area */}
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-            <ChatInterface onNewMessage={(msg) => setMessages((prev) => [...prev, msg])} />
+            <ChatInterface
+              onNewMessage={(msg) => setMessages((prev) => [...prev, msg])}
+              onAssistantComplete={(text) => {
+                if (autoAvatar && avatar.connected) avatar.speak(text);
+              }}
+              onQuoteDraft={(draft) => {
+                setQuoteDraft(draft);
+                setPdfOpen(true); // 会話から見積が来たら自動でPDFウィンドウを開く
+              }}
+            />
           </div>
 
           {/* Avatar panel */}
           <div className="w-56 flex-shrink-0 p-3 border-l border-border/30">
-            <AvatarPanel />
+            <AvatarPanel
+              videoRef={avatar.videoRef}
+              connected={avatar.connected}
+              connecting={avatar.connecting}
+              speaking={avatar.speaking}
+              error={avatar.error}
+              onConnect={avatar.connect}
+              onDisconnect={avatar.disconnect}
+            />
           </div>
         </div>
       </div>
 
       {/* Modals / Drawers */}
       <SettingsSidebar isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <PdfGenerator messages={messages} isOpen={pdfOpen} onClose={() => setPdfOpen(false)} />
+      <PdfGenerator
+        messages={messages}
+        draft={quoteDraft}
+        isOpen={pdfOpen}
+        onClose={() => setPdfOpen(false)}
+      />
     </div>
   );
 }
