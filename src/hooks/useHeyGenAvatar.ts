@@ -1,6 +1,18 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import type StreamingAvatar from '@heygen/streaming-avatar';
 import { getHeyGenToken } from '../lib/api';
+
+// 型のみの参照（ビルド時に消える）。default export のインスタンス型を取り出す。
+type StreamingAvatar = InstanceType<typeof import('@heygen/streaming-avatar').default>;
+
+// SDK の指定子を変数化しておく。文字列リテラルを直接 import() に書くと
+// Vite の import-analysis が静的解決を試み、npm 公開物に entry 実体が無いため
+// ビルドが止まる。変数経由 + /* @vite-ignore */ で解決を実行時まで遅延させる。
+const HEYGEN_PKG = '@heygen/streaming-avatar';
+
+/** HeyGen SDK を実行時に動的ロード（Vite に静的解決させない） */
+function loadHeyGenSdk(): Promise<typeof import('@heygen/streaming-avatar')> {
+  return import(/* @vite-ignore */ HEYGEN_PKG);
+}
 
 /**
  * HeyGen Live(Streaming) Avatar 連携フック。
@@ -40,7 +52,7 @@ export function useHeyGenAvatar() {
     try {
       const { token, avatarId } = await getHeyGenToken();
 
-      const mod = await import(/* @vite-ignore */ '@heygen/streaming-avatar');
+      const mod = await loadHeyGenSdk();
       const { default: StreamingAvatarCtor, AvatarQuality, StreamingEvents } = mod;
 
       const avatar = new StreamingAvatarCtor({ token });
@@ -88,7 +100,7 @@ export function useHeyGenAvatar() {
       const t = text.trim();
       if (!t || !avatarRef.current || !connected) return;
       try {
-        const { TaskType } = await import(/* @vite-ignore */ '@heygen/streaming-avatar');
+        const { TaskType } = await loadHeyGenSdk();
         await avatarRef.current.speak({ text: t, taskType: TaskType.REPEAT });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
